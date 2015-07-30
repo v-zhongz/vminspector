@@ -452,7 +452,7 @@ def main():
     cert_file = config.path_to_write_certificate
     sms = ServiceManagementService(subscription_id, cert_file)
     
-    if len(sys.argv) == 1 :
+    if len(sys.argv) < 2 :
         print "format should be python inspector.py <url of the vhd>"
         exit
     url = sys.argv[1]
