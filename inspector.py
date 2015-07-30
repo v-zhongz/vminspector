@@ -1,23 +1,31 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-
 import requests
 from util import *
 from formats import *
 from math import ceil
 from construct import *
 from os.path import splitext, join
+from azure import WindowsAzureError
 
+from azure.servicemanagement import get_certificate_from_publish_settings
+from azure.servicemanagement import ServiceManagementService
+import os
+import sys
+from azure.storage import BlobService
 
 PTR_TYPE = {
         0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0,
         8: 0, 9: 0, 10: 0, 11: 0, 12: 1, 13: 2, 14: 3,
         }
-(options, args) = get_options()
+#(options, args) = get_options()
+options = type('my_option', (object,), {})()
+global cache
+cache = {}
+last_query_files_num = 0
 
-
-@log_time
+#@log_time
 def get_superblock(ph):
     """TODO: Docstring for get_superblock.
 
@@ -25,10 +33,11 @@ def get_superblock(ph):
     :returns: TODO
 
     """
-    return Superblock.parse(get_blob_page(ph, 1024, 1024))
+    return Superblock.parse(get_blob_page(ph, 1024, 1024, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd))
 
 
-@log_time
+#@log_time
 def get_group_desc_table(ph, block_size, gts):
     """TODO: Docstring for get_group_desc_table.
 
@@ -38,12 +47,11 @@ def get_group_desc_table(ph, block_size, gts):
     offset = ceil(2048.0 / block_size) * block_size
     Group_desc_table = OptionalGreedyRange(Group_desc)
 
-    return Group_desc_table.parse(get_blob_page(ph, offset, block_size*gts))
+    return Group_desc_table.parse(get_blob_page(ph, offset, block_size*gts, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd))
 
 
-@log_time
-@embed_params(blob_service=options.blob_service,
-              container=options.container, vhd=options.vhd)
+#@log_time
 def get_blob_by_key(ph, offset, page_size,
                   blob_service, container, vhd):
     """TODO: Docstring for get_blob_page.
@@ -54,38 +62,15 @@ def get_blob_by_key(ph, offset, page_size,
 
     """
     rangerange = 'bytes=%d-%d' % (ph+offset, ph+offset+page_size-1)
+    
+    if (container, vhd, rangerange) in cache :
+        return cache[(container, vhd, rangerange)]
+    else :
+        cache[(container, vhd, rangerange)] = blob_service.get_blob(container, vhd, x_ms_range=rangerange)
+        return cache[(container, vhd, rangerange)]
+    #return blob_service.get_blob(container, vhd, x_ms_range=rangerange)
 
-    return blob_service.get_blob(container, vhd, x_ms_range=rangerange)
-
-
-@log_time
-@embed_params(sas=options.url)
-def get_blob_by_sas(ph, offset, page_size, sas):
-    """TODO: Docstring for get_blob_.
-
-    :url: TODO
-    :params: TODO
-    :returns: TODO
-
-    """
-    headers = {'x-ms-range': 'bytes=%d-%d' \
-               % (ph+offset, ph+offset+page_size-1),
-               'x-ms-version': '2012-02-12',
-               }
-    r = requests.get(sas, headers=headers)
-
-    return r.content
-
-
-if options.account_key:
-    get_blob_page = get_blob_by_key
-else:
-    get_blob_page = get_blob_by_sas
-
-
-@log_time
-@embed_params(sas=options.url, blob_service=options.blob_service,
-              container=options.container, vhd=options.vhd)
+#@log_time
 def check_vhd_type(sas, blob_service, container, vhd):
     """TODO: Docstring for check_vhd_type.
 
@@ -97,7 +82,7 @@ def check_vhd_type(sas, blob_service, container, vhd):
         properties = blob_service.get_blob_properties(container, vhd)
     else:
         r = requests.head(sas, headers={
-                'x-ms-version': '2012-02-12',
+                'x-ms-version': '2014-02-01',
                 'Connection': 'Keep-Alive'
                 })
         if not r.ok:
@@ -106,12 +91,13 @@ def check_vhd_type(sas, blob_service, container, vhd):
             exit(0)
         properties = r.headers
 
-    blob_page = get_blob_page(0, int(properties['content-length'])-512, 512)
+    blob_page = get_blob_page(0, int(properties['content-length'])-512, 512, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd)
 
     return Hd_ftr.parse(blob_page).type
 
 
-@log_time
+#@log_time
 def get_data_ptr(ph, block_size, ptr, ptr_type):
     """TODO: Docstring for get_data_indir1.
 
@@ -121,7 +107,8 @@ def get_data_ptr(ph, block_size, ptr, ptr_type):
     """
     offset = block_ptr_to_byte(ptr, block_size)
     try:
-        blob_page = get_blob_page(ph, offset, block_size)
+        blob_page = get_blob_page(ph, offset, block_size, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd)
     except WindowsAzureError, e:
         print e
         return ''
@@ -139,7 +126,7 @@ def get_data_ptr(ph, block_size, ptr, ptr_type):
     return data
 
 
-@log_time
+#@log_time
 def get_data_extent(ph, extent, block_size):
     """TODO: Docstring for get_data_extent.
 
@@ -150,10 +137,11 @@ def get_data_extent(ph, extent, block_size):
     block_ptr = (extent.start_hi << 32) + extent.start_lo
     offset = block_ptr_to_byte(block_ptr, block_size)
 
-    return get_blob_page(ph, offset, extent.len*block_size)
+    return get_blob_page(ph, offset, extent.len*block_size, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd)
 
 
-@log_time
+#@log_time
 def get_data_idx(ph, idx, block_size):
     """TODO: Docstring for get_data_idx.
 
@@ -166,10 +154,11 @@ def get_data_idx(ph, idx, block_size):
     Node_block = Struct('index_node_block', Ext4_extent_header,
                         Array(block_size/12-1, Ext4_extent))
 
-    return Node_block.parse(get_blob_page(ph, offset, block_size))
+    return Node_block.parse(get_blob_page(ph, offset, block_size, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd))
 
 
-@log_time
+#@log_time
 def get_data_ext4_tree(ph, extent_tree, block_size):
     """TODO: Docstring for get_data_from_ext4_i_block.
 
@@ -196,8 +185,7 @@ def get_data_ext4_tree(ph, extent_tree, block_size):
     return reduce(lambda a, b: (0, ''.join([a[1], b[1]])), tmp, (0, ''))[1]
 
 
-@log_time
-@embed_params(vhd=options.vhd, path=options.path)
+#@log_time
 def download_ext3_file(ph, inode, filename, block_size, vhd, path):
     """TODO: Docstring for download_ext3_file.
 
@@ -214,8 +202,7 @@ def download_ext3_file(ph, inode, filename, block_size, vhd, path):
     return True
 
 
-@log_time
-@embed_params(vhd=options.vhd, path=options.path)
+#@log_time
 def download_ext4_file(ph, inode, filename, block_size, vhd, path):
     """TODO: Docstring for download_ext4_file.
 
@@ -231,7 +218,7 @@ def download_ext4_file(ph, inode, filename, block_size, vhd, path):
     return True
 
 
-@log_time
+#@log_time
 def block_ptr_to_byte(block_ptr, block_size):
     """TODO: Docstring for block_ptr_to_byte.
 
@@ -242,7 +229,7 @@ def block_ptr_to_byte(block_ptr, block_size):
     return block_size * block_ptr
 
 
-@log_time
+#@log_time
 def parse_KB(superblock):
     """TODO: Docstring for parse_KB.
 
@@ -261,9 +248,7 @@ def parse_KB(superblock):
 
 # If filetype feature flag is turn off, the ext4_dir_entry instead of
 # ext4_dir_entry2 will be used, but it doesn't matter to us.
-@log_time
-@embed_params(path_list=options.path_list,
-              filename=options.filename, extension=options.extension)
+#@log_time
 def search_i(ph, inode, index, block_size, to_inode,
              path_list, filename, extension):
     """TODO: Docstring for search_i.
@@ -285,7 +270,7 @@ def search_i(ph, inode, index, block_size, to_inode,
                 or filename == '' and extension == '']
     else:
         inodes = [search_i(ph, to_inode(item.inode),
-                           index+1, block_size, to_inode)
+                           index+1, block_size, to_inode, options.path_list, options.filename, options.extension)
                   for item in directory if item.name == path_list[index]]
         if inodes:
             return inodes[0]
@@ -294,7 +279,7 @@ def search_i(ph, inode, index, block_size, to_inode,
             return []
 
 
-@log_time
+#@log_time
 def parse_partition(partition):
     """TODO: Docstring for parse_partition.
 
@@ -319,7 +304,7 @@ def parse_partition(partition):
     Inode_table = Struct('inode_table', Array(inodes_per_group, Inode))
     its = inodes_per_group * superblock.inode_size  # inode table size.
 
-    @log_time
+    #@log_time
     def to_inode(num):
         """TODO: Docstring for to_inode.
 
@@ -335,7 +320,8 @@ def parse_partition(partition):
             group_desc = group_desc_table[block_group]
             offset = block_ptr_to_byte(group_desc.inode_table_ptr, block_size)
             inode_tables[block_group] = Inode_table.parse(
-                    get_blob_page(ph, offset, its))
+                    get_blob_page(ph, offset, its, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd))
 
         inode_table = inode_tables[block_group]
         inode = inode_table.inode[local_index]
@@ -346,8 +332,10 @@ def parse_partition(partition):
 
     root = to_inode(2)
     target = [(inode_num, name) for inode_num, name
-              in search_i(ph, root, 0, block_size, to_inode)]
-
+              in search_i(ph, root, 0, block_size, to_inode, options.path_list, options.filename, options.extension)]
+    
+    global last_query_files_num
+    last_query_files_num = len(target)
     if options.ls:
         for inode, name in target:
             print name
@@ -355,10 +343,10 @@ def parse_partition(partition):
         return True
 
     target = [(to_inode(inode_num), name) for inode_num, name in target]
-    len1 = len([download_ext4_file(ph, inode, name, block_size)
+    len1 = len([download_ext4_file(ph, inode, name, block_size, options.vhd, options.path)
                 for inode, name in target
                 if inode.flags.EXTENTS and not inode.mode.IFDIR])
-    len2 = len([download_ext3_file(ph, inode, name, block_size)
+    len2 = len([download_ext3_file(ph, inode, name, block_size, vhd=options.vhd, path=options.path)
                 for inode, name in target
                 if not inode.flags.EXTENTS and not inode.mode.IFDIR])
     print '%d ext4 files + %d ext2/3 files have been downloaded.' % (len1, len2)
@@ -367,7 +355,7 @@ def parse_partition(partition):
 
 
 # TODO(shiehinms): Complete the dictionary.
-@log_time
+#@log_time
 def part_type(pt):
     """TODO: Docstring for part_type.
 
@@ -383,14 +371,15 @@ def part_type(pt):
     return partition_type.setdefault(pt, 'Non-Linux')
 
 
-@log_time
+#@log_time
 def parse_image():
     """TODO: Docstring for parse_image.
 
     :returns: TODO
 
     """
-    mbr = Mbr.parse(get_blob_page(0, 0, 512))
+    mbr = Mbr.parse(get_blob_page(0, 0, 512, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd))
 
     for partition in mbr.mbr_partition_entry:
         pt = partition.partition_type
@@ -402,13 +391,39 @@ def parse_image():
 
     return True
 
+def get_options2(url, account_key, path, filename, extension, type, ls):
+    options.url = url
+    options.account_key = account_key
+    options.path = path
+    options.filename = filename
+    options.extension = extension
+    options.type = 4
+    options.ls = ls
+    
+    options.extension and options.filename and exit(print_warning())
+    
+    tmp = urlparse(options.url)
+    options.account_name = tmp.netloc.split('.')[0]
+    options.container = tmp.path.split('/')[1]
+    options.vhd = tmp.path.split('/')[2]
+    options.host_base = tmp.netloc[tmp.netloc.find('.'):]
 
-@log_time
-def main():
+    if options.account_key:
+        options.blob_service = BlobService(options.account_name,
+                                           options.account_key,
+                                           host_base=options.host_base)
+    else:
+        options.blob_service = None
+
+    options.path_list = split_path(options.path)
+
+#@log_time
+def old_main(url="", account_key="", path="", filename="", extension="", type=4, ls=False):
     """TODO: Docstring for main.
     :returns: TODO
 
     """
+    get_options2(url, account_key, path, filename, extension, type, ls)
     if options.path[0] != '/':
         print '\033[91m Support only absolute path.\033[0m'
         exit(0)
@@ -417,9 +432,82 @@ def main():
     HD_TYPE_DYNAMIC = 3
 
     init_dir(''.join(['./', options.vhd, options.path]))
-    check_vhd_type() == HD_TYPE_FIXED and parse_image() or \
-            check_vhd_type() == HD_TYPE_DYNAMIC and True
+    check_vhd_type(sas=options.url, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd) == HD_TYPE_FIXED and parse_image() or \
+            check_vhd_type(sas=options.url, blob_service=options.blob_service,
+              container=options.container, vhd=options.vhd) == HD_TYPE_DYNAMIC and True
 
+def main():
+    '''
+        new version simulate a simple bash
+    '''
+       
+    config = __import__('config')
+    
+    subscription_id = get_certificate_from_publish_settings(
+        publish_settings_path=config.publish_settings_path,
+        path_to_write_certificate=config.path_to_write_certificate,
+    )
+    
+    cert_file = config.path_to_write_certificate
+    sms = ServiceManagementService(subscription_id, cert_file)
+    
+    if len(sys.argv) == 1 :
+        print "format should be python inspector.py <url of the vhd>"
+        exit
+    url = sys.argv[1]
+    storage_name = url[8:url.find('.')]
+    
+    storage_account_key = sms.get_storage_account_keys(storage_name).storage_service_keys.primary.encode('ascii','ignore')
+    
+    nowpath = "/"
+    
+    def get_sentence(s) :
+        st = s.find(' ')
+        while st < len(s) and s[st] ==  ' ' :
+            st += 1
+        ed = len(s)
+        for i in range(st, len(s)) :
+            if s[i] == ' ' and s[i-1] != '\\' :
+                ed = i
+                break
+        while ed>0 and s[ed-1] == '/' :
+            ed -= 1
+        return s[st:ed].replace("//", "/")
+    
+    global last_query_files_num
+    while True :
+        cmd = raw_input(nowpath+" $ ")
+        if cmd.split(' ')[0] == "quit" :
+            break
+        elif cmd.split(' ')[0] == "ls" :
+            old_main(url=url, account_key=storage_account_key, path=nowpath, ls=True)
+        elif cmd.startswith("cd ") :
+            sentence = get_sentence(cmd)
+            if sentence != "" :
+                if sentence == ".." :
+                    if nowpath != "/" :
+                        nowpath = nowpath[:nowpath[:-1].rfind('/')+1]
+                elif sentence[0] == '/' :
+                    old_main(url=url, account_key=storage_account_key, path=sentence, ls=True)
+                    if last_query_files_num == 0 :
+                        print "no such directory"
+                    else :
+                        nowpath = sentence + "/"
+                elif sentence != "" :
+                    old_main(url=url, account_key=storage_account_key, path=(nowpath+sentence), ls=True)
+                    if last_query_files_num == 0 :
+                        print "no such directory"
+                    else :
+                        nowpath += sentence + "/"
+        elif cmd.startswith("download ") :
+            sentence = get_sentence(cmd)
+            tmp = sentence.rfind('/')
+            if sentence != "" :
+                old_main(url=url, account_key=storage_account_key, path=(nowpath+sentence[:tmp]), filename=sentence[(tmp+1):])
+        else :
+            print "invalid command"
 
 if __name__ == '__main__':
+    get_blob_page = get_blob_by_key
     main()

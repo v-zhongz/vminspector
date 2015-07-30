@@ -3,105 +3,51 @@ Retrieve EXT2/3/4 files from vhd which is stored in Azure Storage.
 
 Functionality
 ==========
-You can use vminspector to retrieve your file from Azure Storage need not to turn off you Virtual Machine.    
+You can use vminspector to retrieve your file from Azure Storage need not to turn on you Virtual Machine.    
 
-You can access your vhd file by using:    
-
-- Account Key
-- shared access signature (i.e. SAS)
-
-You can combine your container key and container name to form a URL. More detail will be covered in the following section.
+You should prepare your **azure publish settings** and set it in **config.py** to access your vhd file.
 
 Installation
 ============
 Download the repo using git
 
-    git clone https://github.com/shiehinms/vminspector.git
+	git clone https://github.com/v-zhongz/vminspector
 
 Dependencies
 ============
 
-Python module: Construct==2.5.2, azure.    
+Python module: Construct==2.5.2, azure, requests.    
 
-    (sudo) pip install Construct==2.5.2 azure
+    (sudo) pip install Construct==2.5.2 azure requests
 
 Usage
 =====
 After installation of the tool and dependencies, you can run the script by following command:
 
-    python inspector.py
+    python inspector.py <url of the vhd>
 
-and follow the help message(The usage part.).    
-Please make sure that you have the access to the vhd you want to retrieve.
+After the following displaying, the current directory is root directory now:
 
-Options:
------------
-    --version             show program's version number and exit
-    -h, --help            show this help message and exit
-    -u URL, --url=URL     Url of the vhd *
-    -k ACCOUNT_KEY, --key=ACCOUNT_KEY
-                        Account Key
-    -f FILENAME, --file=FILENAME
-                        File name
-    -p PATH, --path=PATH  Searching path *
-    -e EXTENSION, --extension=EXTENSION
-                        Extension
-    -t TYPE, --type=TYPE  EXT2/3/4; 2,3,4
-    --ls                  List the dir
+	/ $ 
+	
+Command
+=====
+To change current directory, use:
 
--
+	cd <absolute path or relative path>
+	
+To download a file, use:
 
--u    
+	download <absolute path or relative path>
+	
+To List files in current directory, use:
 
-Ever vhd stored in Azure Storage have a URL address, which can be used to locate the vhd file. You can get the url of a particular vhd file from Portal.
+	ls
 
--
+To end the python script, use:
 
--k    
-
-The account key of your container. Notice that, -k and -e are mutually exclusive.
-
--
-
--f    
-
-Name of the file which you want to retrieve. Notice that, the absolute path of the file **should not** be passed.
-
--
-
--p    
-
-The directory which contain the file you want to retrieve.
-
--
-
--e    
-
-The extension of the file you want to retrieve. Notice that, -k and -e are mutually exclusive.
-
--
-
--t    
-
-Optional. Predeclared the file system of your virtual machine if you know it. This option is used to speed up the parsing process.
-
--
-
---ls    
-
-If you want to inspect a specific directory before you take any action about it, you can list them.
-
-Exemple:
---------
-Access with account key:    
-
-    python inspector.py -k ksjdfsajdfljsldflsadfjkasfd -u www.portal.com/shieh/shieh.vhd -p /var/log -f waggent.log
-    
-Access with account key:    
-
-    python -u www.portal.com/shieh/shieh.vhd -p /var/log -f waggent.log
-
-
+	quit
+	
 Issue
 =====
 - For the time being, this tool can only be used to retrieve file remotely, but can not be used to revise the vhd file. However, revisability is a more practical functionality we want, and it's on the schedule.
