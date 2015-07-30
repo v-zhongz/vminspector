@@ -24,7 +24,7 @@ Usage
 =====
 After installation of the tool and dependencies, you can run the script by following command:
 
-    python inspector.py <url of the vhd>
+    python inspector.py <url-of-the-vhd>
 
 After the following displaying, the current directory is root directory now:
 
@@ -34,11 +34,11 @@ Command
 =====
 To change current directory, use:
 
-	cd <absolute path or relative path>
+	cd <absolute-path-or-relative-path>
 	
 To download a file, use:
 
-	download <absolute path or relative path>
+	download <absolute-path-or-relative-path>
 	
 To List files in current directory, use:
 
