@@ -5,7 +5,7 @@ Functionality
 ==========
 You can use vminspector to retrieve your file from Azure Storage need not to turn on you Virtual Machine.    
 
-You should prepare your **azure publish settings** and set it in **config.py** to access your vhd file.
+You should prepare your **azure publish settings** to access your vhd file.
 
 Installation
 ============
@@ -24,14 +24,28 @@ Usage
 =====
 After installation of the tool and dependencies, you can run the script by following command:
 
-    python inspector.py <url-of-the-vhd>
+    python inspector.py inspect <vhd-url>
+	
+    python inspector.py get-account
+	
+    python inspector.py get-default-account
+	
+    python inspector.py select-account <subscription-name>
+	
+    python inspector.py add-account <publishsettings-path>
+	
+    python inspector.py delete-account <subscription-name>
 
-After the following displaying, the current directory is root directory now:
+    python inspector.py help
+    
+If you're using **VMInspector** for the **first time**, you should use **"add-account"** to import your publishsettings to get a certificate.
+    
+For **"inspect"**, after the following displaying, the current directory is root directory of your vhd now:
 
 	/ $ 
 	
-Command
-=====
+Inspect Command
+===============
 To change current directory, use:
 
 	cd <absolute-path-or-relative-path>

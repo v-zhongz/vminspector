@@ -11,9 +11,11 @@ from azure import WindowsAzureError
 
 from azure.servicemanagement import get_certificate_from_publish_settings
 from azure.servicemanagement import ServiceManagementService
+from azure import _validate_not_none,ETree
 import os
 import sys
 from azure.storage import BlobService
+from config import default_subscription_id
 
 PTR_TYPE = {
         0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0,
@@ -437,27 +439,18 @@ def old_main(url="", account_key="", path="", filename="", extension="", type=4,
             check_vhd_type(sas=options.url, blob_service=options.blob_service,
               container=options.container, vhd=options.vhd) == HD_TYPE_DYNAMIC and True
 
-def main():
-    '''
-        new version simulate a simple bash
-    '''
-       
+def inspect():
     config = __import__('config')
-    
-    subscription_id = get_certificate_from_publish_settings(
-        publish_settings_path=config.publish_settings_path,
-        path_to_write_certificate=config.path_to_write_certificate,
-    )
-    
-    cert_file = config.path_to_write_certificate
+    if config.default_subscription_name == "" :
+        print "Please select an account"
+        exit
+    subscription_id = config.default_subscription_id
+    cert_file = "pem\\" + config.default_subscription_name + '.pem'
+    _validate_not_none('cert_file',cert_file)
     sms = ServiceManagementService(subscription_id, cert_file)
     
-    if len(sys.argv) < 2 :
-        print "format should be python inspector.py <url of the vhd>"
-        exit
-    url = sys.argv[1]
+    url = sys.argv[2]
     storage_name = url[8:url.find('.')]
-    
     storage_account_key = sms.get_storage_account_keys(storage_name).storage_service_keys.primary.encode('ascii','ignore')
     
     nowpath = "/"
@@ -508,6 +501,123 @@ def main():
         else :
             print "invalid command"
 
+def get_help():
+    """
+    """
+    print "command:\n"
+    print "python inspector.py inspect <vhd-url>\n"
+    print "                    get-account\n"
+    print "                    get-default-account\n"
+    print "                    select-account <subscription-name>\n"
+    print "                    add-account <publishsettings-path>\n"
+    print "                    delete-account <subscription-name>\n"
+    print "adding account existed will cover old account\n"
+    
+def main():
+    '''
+        new version simulate a simple bash
+    '''
+    
+    if len(sys.argv) < 2 :
+        get_help()
+        return
+    if sys.argv[1] == 'inspect' :
+        if len(sys.argv) < 3 :
+            get_help()
+            return
+        inspect()
+        
+    elif sys.argv[1] == 'get-account' :
+        config = __import__('config')
+        print "    Subscription_name                   Subscription_id"
+        print "=========================    ======================================"
+        for i in config.accounts:
+            print i.rjust(25),config.accounts[i].rjust(40)
+        
+    elif sys.argv[1] == 'get-default-account' :
+        config = __import__('config')
+        print 'default_subscription_name: ' + str(config.default_subscription_name) + '\n'
+        print 'default_subscription_id: ' + str(config.default_subscription_id) + '\n'
+        
+    elif sys.argv[1] == 'select-account' :
+        if len(sys.argv) < 3 :
+            get_help()
+            return
+        config = __import__('config')
+        subscription_name = sys.argv[2]
+        for i in range(3,len(sys.argv)) :
+            subscription_name += ' '+sys.argv[i]
+        if not (subscription_name in config.accounts) :
+            print "Account not exist."
+            return
+        else :
+            accounts = config.accounts
+            subscription_id = accounts[subscription_name]
+            f = open('config.py','w')
+            f.write('default_subscription_name=\''+subscription_name+'\'\n')
+            f.write('default_subscription_id=\''+subscription_id+'\'\n')
+            f.write('accounts='+str(accounts))
+            f.close()
+            
+    elif sys.argv[1] == 'add-account' :
+        if len(sys.argv) < 3 :
+            get_help()
+            return
+        publish_settings_path = sys.argv[2]
+        for i in range(3,len(sys.argv)) :
+            publish_settings_path += ' '+sys.argv[i]
+        _validate_not_none('publish_settings_path', publish_settings_path)
+        
+        # parse the publishsettings file and find the ManagementCertificate Entry
+        tree = ETree.parse(publish_settings_path)
+        subscriptions = tree.getroot().findall("./PublishProfile/Subscription")
+        subscription = subscriptions[0]
+        subscription_name = subscription.get('Name')
+
+        subscription_id = get_certificate_from_publish_settings(
+            publish_settings_path=publish_settings_path,
+            path_to_write_certificate='pem\\' + subscription_name+'.pem',
+        )
+    
+        config = __import__('config')
+        accounts = config.accounts
+        accounts[subscription_name] = subscription_id
+        if config.default_subscription_name == "" :
+            tmp = "default_subscription_name=\"" + subscription_name + "\"\n"
+            tmp += "default_subscription_id=\"" + subscription_id + "\"\n"
+        else :
+            f = open('config.py','r')
+            tmp = f.readline() + f.readline()
+        f = open('config.py','w')
+        f.write(tmp)
+        f.write('accounts='+str(accounts))
+        f.close()
+        
+    elif sys.argv[1] == 'delete-account' :
+        if len(sys.argv) < 3 :
+            get_help()
+            return
+        config = __import__('config')
+        accounts = config.accounts
+        subscription_name = sys.argv[2]
+        for i in range(3,len(sys.argv)) :
+            subscription_name += ' '+sys.argv[i]
+        accounts.pop(subscription_name, None)
+        
+        if subscription_name == config.default_subscription_name :
+            subscription_name = ''
+            subscription_id = ''
+        else :
+            subscription_name = config.default_subscription_name
+            subscription_id = config.default_subscription_id
+            
+        f = open('config.py','w')
+        f.write('default_subscription_name=\"'+subscription_name+'\"\n')
+        f.write('default_subscription_id=\"'+subscription_id+'\"\n')
+        f.write('accounts='+str(accounts))
+        f.close()
+    else :
+        get_help()
 if __name__ == '__main__':
     get_blob_page = get_blob_by_key
     main()
